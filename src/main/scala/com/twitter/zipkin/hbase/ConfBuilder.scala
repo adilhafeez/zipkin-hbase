@@ -1,7 +1,7 @@
-package com.twitter.zipkin.storage.hbase.utils
+package com.twitter.zipkin.hbase
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.hbase.{HConstants, HBaseConfiguration}
+import org.apache.hadoop.hbase.{HBaseConfiguration, HConstants}
 
 /**
  * Trait used to create Hadoop conf from different passed in params.

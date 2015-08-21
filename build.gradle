@@ -1,0 +1,47 @@
+buildscript {
+    repositories { jcenter() }
+}
+
+apply plugin: 'idea'
+apply plugin: 'scala'
+apply from: 'gradle/scalatest.gradle'
+
+
+compileScala.scalaCompileOptions.additionalParameters = ['-feature']
+compileTestScala.scalaCompileOptions.additionalParameters = ['-feature']
+test.maxParallelForks = 1
+
+repositories {
+    jcenter()
+    maven { url 'https://repo.typesafe.com/typesafe/releases/' }
+    maven { url 'https://maven.twttr.com/' }
+}
+
+ext {
+    scalaVersion = '2.10.5'
+    scalaInterfaceVersion = '2.10'
+    zipkinVersion = '1.2.1-rc24'
+}
+
+dependencies {
+    compile "org.scala-lang:scala-library:${scalaVersion}"
+
+    compile "io.zipkin:zipkin-scrooge:${zipkinVersion}"
+    compile "io.zipkin:zipkin-common:${zipkinVersion}"
+    compile "org.apache.hbase:hbase-client:0.99.2"
+
+    testCompile "io.zipkin:zipkin-common:${zipkinVersion}:test"
+    testCompile "org.scalatest:scalatest_${scalaInterfaceVersion}:2.2.5"
+    testCompile "org.apache.hbase:hbase-testing-util:0.99.2"
+}
+
+// Tests fail looking for LimitInputStream otherwise
+configurations.all {
+    resolutionStrategy {
+        eachDependency { DependencyResolveDetails details ->
+            if (details.requested.group == 'com.google.guava') {
+                details.useVersion '14.0.1'
+            }
+        }
+    }
+}

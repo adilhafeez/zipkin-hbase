@@ -1,18 +1,17 @@
 package com.twitter.zipkin.hbase
 
 import com.twitter.zipkin.builder.Builder
-import com.twitter.zipkin.storage.Aggregates
-import com.twitter.zipkin.storage.hbase.HBaseAggregates
-import com.twitter.zipkin.storage.hbase.utils.{ThreadProvider, HBaseTable}
+import com.twitter.zipkin.storage.SpanStore
+import com.twitter.zipkin.storage.hbase.HBaseSpanStore
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.HBaseConfiguration
 
-case class AggregatesBuilder(
+/** Allows [[HBaseSpanStore]] to be used with legacy [[Builder]]s. */
+case class SpanStoreBuilder(
   confOption: Option[Configuration] = Some(HBaseConfiguration.create()),
   zkServers: Option[String] = None,
   zkPort: Option[Int] = None
-) extends Builder[Aggregates] with ConfBuilder {
-  self =>
+) extends Builder[SpanStore] with ConfBuilder {
 
-  def apply() = new HBaseAggregates(conf)
+  def apply() = new HBaseSpanStore(conf)
 }
