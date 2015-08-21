@@ -3,17 +3,29 @@ package com.twitter.zipkin.storage.hbase
 import com.twitter.util.Await
 import com.twitter.zipkin.Constants
 import com.twitter.zipkin.common.{Annotation, Endpoint, Span}
-import com.twitter.zipkin.hbase.{IndexBuilder, TableLayouts}
+import com.twitter.zipkin.hbase.TableLayouts
 import com.twitter.zipkin.storage.hbase.mapping.ServiceMapper
-import com.twitter.zipkin.storage.hbase.utils.{HBaseTable, IDGenerator}
-import org.apache.hadoop.hbase.client.Scan
+import com.twitter.zipkin.storage.hbase.utils.{IDGenerator, HBaseTable}
+import org.apache.hadoop.hbase.client.{Scan, Get, HTable}
 import org.apache.hadoop.hbase.util.Bytes
 
-class HBaseIndexSpec extends ZipkinHBaseSpecification {
+/**
+ * This isn't really a great unit test but it's a good starting
+ * point until I have a mock HBaseTable.
+ */
+class HBaseSpanStoreSpec extends ZipkinHBaseSpecification {
 
   val tablesNeeded = TableLayouts.tables.keys.toSeq
 
-  var index = IndexBuilder(confOption = Some(_conf))()
+  val traceId = 100L
+  val spanId = 567L
+  val span = Span(traceId, "span.methodCall()", spanId, None, List(), List())
+
+  val spanStore = new HBaseSpanStore(_conf)
+
+  after {
+    spanStore.close()
+  }
 
   val endOfTime = Long.MaxValue
   def before(ts: Long) = ts - 1
@@ -58,7 +70,7 @@ class HBaseIndexSpec extends ZipkinHBaseSpecification {
     val idGen = new IDGenerator(idGenTable)
     val serviceMapper = new ServiceMapper(mappingTable, idGen)
 
-    Await.result(index.indexServiceName(spanOne))
+    Await.result(spanStore.indexServiceName(spanOne))
     val results = Await.result(serviceTable.scan(new Scan(), 100))
     results.size should be (1)
 
@@ -73,7 +85,7 @@ class HBaseIndexSpec extends ZipkinHBaseSpecification {
 
   test("indexTraceIdByServiceAndName") {
     val serviceSpanNameTable = new HBaseTable(_conf, TableLayouts.idxServiceSpanNameTableName)
-    Await.result(index.indexTraceIdByServiceAndName(spanOne))
+    Await.result(spanStore.indexTraceIdByServiceAndName(spanOne))
     val scan = new Scan()
     val results = Await.result(serviceSpanNameTable.scan(scan, 100))
     results.size should be (1)
@@ -81,21 +93,21 @@ class HBaseIndexSpec extends ZipkinHBaseSpecification {
 
   test("indexSpanByAnnotations") {
     val annoTable = new HBaseTable(_conf, TableLayouts.idxServiceAnnotationTableName)
-    Await.result(index.indexSpanByAnnotations(spanFive))
+    Await.result(spanStore.indexSpanByAnnotations(spanFive))
     val result = Await.result(annoTable.scan(new Scan(), 1000))
     result.size should be (1)
   }
 
   test("indexDuration") {
     val durationTable = new HBaseTable(_conf, TableLayouts.durationTableName)
-    Await.result(index.indexSpanDuration(spanOne))
+    Await.result(spanStore.indexSpanDuration(spanOne))
     val result = Await.result(durationTable.scan(new Scan(), 1000))
     result.size should be (1)
   }
 
   test("getTracesDuration") {
-    Await.result(index.indexSpanDuration(spanOne))
-    val durations = Await.result(index.getTracesDuration(Seq(traceIdOne)))
+    Await.result(spanStore.indexSpanDuration(spanOne))
+    val durations = Await.result(spanStore.getTracesDuration(Seq(traceIdOne)))
     durations should not be (Seq())
     durations.map {_.duration} should contain(100)
 
@@ -103,44 +115,74 @@ class HBaseIndexSpec extends ZipkinHBaseSpecification {
   }
 
   test("getTraceIdsByName") {
-    Await.result(index.indexServiceName(spanOne))
-    Await.result(index.indexServiceName(spanTwo))
-    Await.result(index.indexServiceName(spanThree))
-    Await.result(index.indexServiceName(spanFour))
+    Await.result(spanStore.indexServiceName(spanOne))
+    Await.result(spanStore.indexServiceName(spanTwo))
+    Await.result(spanStore.indexServiceName(spanThree))
+    Await.result(spanStore.indexServiceName(spanFour))
 
-    Await.result(index.indexTraceIdByServiceAndName(spanOne))
-    Await.result(index.indexTraceIdByServiceAndName(spanTwo))
-    Await.result(index.indexTraceIdByServiceAndName(spanThree))
-    Await.result(index.indexTraceIdByServiceAndName(spanFour))
+    Await.result(spanStore.indexTraceIdByServiceAndName(spanOne))
+    Await.result(spanStore.indexTraceIdByServiceAndName(spanTwo))
+    Await.result(spanStore.indexTraceIdByServiceAndName(spanThree))
+    Await.result(spanStore.indexTraceIdByServiceAndName(spanFour))
 
-    val emptyResult = Await.result(index.getTraceIdsByName(serviceNameOne, None, before(spanOneStart), 1))
+    val emptyResult = Await.result(spanStore.getTraceIdsByName(serviceNameOne, None, before(spanOneStart), 1))
     emptyResult should be (Seq())
 
     // Try and get the first trace from the first service name
-    val t1 = Await.result(index.getTraceIdsByName(serviceNameOne, None, before(endOfTime), 1))
+    val t1 = Await.result(spanStore.getTraceIdsByName(serviceNameOne, None, before(endOfTime), 1))
     t1.map {_.traceId} should contain(traceIdOne)
     t1.map {_.timestamp} should contain(spanOneStart)
     t1.size should be (1)
 
     // Try and get the first two traces from the second service name
-    val t2 = Await.result(index.getTraceIdsByName(serviceNameTwo, None, before(endOfTime), 100))
+    val t2 = Await.result(spanStore.getTraceIdsByName(serviceNameTwo, None, before(endOfTime), 100))
     t2.map {_.traceId} should contain(traceIdOne)
     t2.map {_.traceId} should contain(traceIdFour)
     t2.map {_.timestamp} should contain(spanTwoStart)
     t2.map {_.timestamp} should contain(spanThreeStart)
 
     // Try and get the first trace from the first service name and the first span name
-    val t3 = Await.result(index.getTraceIdsByName(serviceNameOne, Some(spanOne.name), before(endOfTime), 1))
+    val t3 = Await.result(spanStore.getTraceIdsByName(serviceNameOne, Some(spanOne.name), before(endOfTime), 1))
     t3.map {_.traceId} should contain(traceIdOne)
     t3.map {_.timestamp} should contain(spanOneStart)
     t3.size should be (1)
   }
 
   test("getTraceIdsByAnnotation") {
-    Await.result(index.indexSpanByAnnotations(spanFive))
-    val idf = index.getTraceIdsByAnnotation(spanFive.annotations.head.serviceName, spanFive.annotations.head.value, None, before(endOfTime), 100)
+    Await.result(spanStore.indexSpanByAnnotations(spanFive))
+    val idf = spanStore.getTraceIdsByAnnotation(spanFive.annotations.head.serviceName, spanFive.annotations.head.value, None, before(endOfTime), 100)
     val ids = Await.result(idf)
     ids.size should be (1)
     ids.map {_.traceId} should contain(spanFive.traceId)
+  }
+
+  test("storeSpan") {
+    Await.result(spanStore.apply(Seq(span)))
+    // The data should be there by now.
+    val htable = new HTable(_conf, TableLayouts.storageTableName)
+    val result = htable.get(new Get(Bytes.toBytes(traceId)))
+    result.size shouldEqual 1
+  }
+
+  test("tracesExist") {
+    // Put the span just in case the ordering changes.
+    Await.result(spanStore.apply(Seq(span)))
+    val idsFound = Await.result(spanStore.tracesExist(Seq(traceId, 3002L)))
+    idsFound should contain(traceId)
+    idsFound.size should be (1)
+  }
+
+  test("getSpansByTraceId") {
+    Await.result(spanStore.apply(Seq(span)))
+    val spansFound = spanStore.getSpansByTraceId(traceId)
+    Await.result(spansFound) should contain(span)
+  }
+
+  test("getSpansByTraceIds") {
+    Await.result(spanStore.apply(Seq(span)))
+    val spansFoundFuture = spanStore.getSpansByTraceIds(Seq(traceId, 302L))
+    val spansFound = Await.result(spansFoundFuture).flatten
+    spansFound should contain(span)
+    spansFound.size should be (1)
   }
 }

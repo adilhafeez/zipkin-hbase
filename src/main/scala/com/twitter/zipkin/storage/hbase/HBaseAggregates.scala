@@ -9,18 +9,19 @@ import com.twitter.zipkin.thriftscala
 import com.twitter.zipkin.hbase.TableLayouts
 import com.twitter.zipkin.storage.Aggregates
 import com.twitter.zipkin.storage.hbase.mapping.ServiceMapper
-import com.twitter.zipkin.storage.hbase.utils.{HBaseTable, IDGenerator}
+import com.twitter.zipkin.storage.hbase.utils.{ThreadProvider, HBaseTable, IDGenerator}
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.client.{Scan, Put}
 import org.apache.hadoop.hbase.util.Bytes
 import scala.collection.JavaConverters._
 
-trait HBaseAggregates extends Aggregates {
+class HBaseAggregates(conf: Configuration) extends Aggregates {
 
-  val dependenciesTable: HBaseTable
-  val topAnnotationsTable: HBaseTable
+  val dependenciesTable = new HBaseTable(conf, TableLayouts.dependenciesTableName)
+  val topAnnotationsTable = new HBaseTable(conf, TableLayouts.topAnnotationsTableName)
+  val mappingTable = new HBaseTable(conf, TableLayouts.mappingTableName, mainExecutor = ThreadProvider.mappingTableExecutor)
+  val idGenTable = new HBaseTable(conf, TableLayouts.idGenTableName, mainExecutor = ThreadProvider.idGenTableExecutor)
 
-  val mappingTable: HBaseTable
-  val idGenTable: HBaseTable
   lazy val idGen = new IDGenerator(idGenTable)
   lazy val serviceMapper = new ServiceMapper(mappingTable, idGen)
 
