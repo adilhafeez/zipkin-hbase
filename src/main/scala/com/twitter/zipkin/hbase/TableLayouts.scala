@@ -20,10 +20,6 @@ object TableLayouts {
   val storageFamily = Bytes.toBytes("S")
   val storageTTL = 14.days
 
-  val durationTableName = "zipkin.duration"
-  val durationDurationFamily = Bytes.toBytes("D")
-  val durationStartTimeFamily = Bytes.toBytes("s")
-
   val idxServiceTableName = "zipkin.idxService"
   val idxServiceFamily = Bytes.toBytes("D")
 
@@ -32,10 +28,6 @@ object TableLayouts {
 
   val idxServiceAnnotationTableName = "zipkin.idxServiceAnnotation"
   val idxAnnotationFamily = Bytes.toBytes("D")
-
-  val topAnnotationsTableName = "zipkin.topAnnotations"
-  val topAnnotationFamily = Bytes.toBytes("A")
-  val topAnnotationKeyValueFamily = Bytes.toBytes("K")
 
   val dependenciesTableName = "zipkin.dependencies"
   val dependenciesFamily = Bytes.toBytes("D")
@@ -49,11 +41,9 @@ object TableLayouts {
 
   val tables = Map(
     storageTableName -> (Seq(storageFamily), Some(storageTTL)),
-    durationTableName -> (Seq(durationDurationFamily, durationStartTimeFamily), Some(storageTTL)),
     idxServiceTableName -> (Seq(idxServiceFamily), Some(storageTTL)),
     idxServiceSpanNameTableName -> (Seq(idxServiceSpanNameFamily), Some(storageTTL)),
     idxServiceAnnotationTableName -> (Seq(idxAnnotationFamily), Some(storageTTL)),
-    topAnnotationsTableName -> (Seq(topAnnotationFamily, topAnnotationKeyValueFamily), Some(storageTTL)),
     dependenciesTableName -> (Seq(dependenciesFamily) , Some(storageTTL)),
 
     // Tables that need to be kept forever.

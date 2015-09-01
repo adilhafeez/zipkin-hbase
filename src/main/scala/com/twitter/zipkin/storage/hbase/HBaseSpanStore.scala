@@ -2,24 +2,24 @@ package com.twitter.zipkin.storage.hbase
 
 import java.nio.ByteBuffer
 
-import com.twitter.conversions.time._
 import com.twitter.logging.Logger
 import com.twitter.scrooge.BinaryThriftStructSerializer
-import com.twitter.util.{Duration, Future}
+import com.twitter.util.Future
 import com.twitter.zipkin.common.Span
 import com.twitter.zipkin.conversions.thrift._
-import com.twitter.zipkin.storage.hbase.mapping.ServiceMapper
-import com.twitter.zipkin.{Constants, thriftscala}
 import com.twitter.zipkin.hbase.TableLayouts
-import com.twitter.zipkin.storage.{TraceIdDuration, IndexedTraceId, SpanStore}
-import com.twitter.zipkin.storage.hbase.utils.{ThreadProvider, IDGenerator, HBaseTable}
+import com.twitter.zipkin.storage.hbase.mapping.ServiceMapper
+import com.twitter.zipkin.storage.hbase.utils.{HBaseTable, IDGenerator, ThreadProvider}
+import com.twitter.zipkin.storage.{IndexedTraceId, SpanStore}
 import com.twitter.zipkin.util.Util
+import com.twitter.zipkin.{Constants, thriftscala}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.KeyValue
-import org.apache.hadoop.hbase.client.{Scan, Result, Get, Put}
+import org.apache.hadoop.hbase.client.{Get, Put, Result, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
-import org.apache.hadoop.hbase.filter.{BinaryComparator, ValueFilter, KeyOnlyFilter}
+import org.apache.hadoop.hbase.filter.{BinaryComparator, ValueFilter}
 import org.apache.hadoop.hbase.util.Bytes
+
 import scala.collection.JavaConverters._
 
 /**
@@ -33,21 +33,20 @@ import scala.collection.JavaConverters._
  * Column Value: Thrift Serialized Span
  */
 class HBaseSpanStore(conf: Configuration) extends SpanStore {
-  val hbaseTable = new HBaseTable(conf, TableLayouts.storageTableName, mainExecutor = ThreadProvider.storageExecutor)
+  private[this] val hbaseTable = new HBaseTable(conf, TableLayouts.storageTableName, mainExecutor = ThreadProvider.storageExecutor)
 
   val log = Logger.get(getClass.getName)
 
-  val durationTable = new HBaseTable(conf, TableLayouts.durationTableName)
-  val idxServiceTable = new HBaseTable(conf, TableLayouts.idxServiceTableName, mainExecutor = ThreadProvider.indexServiceExecutor)
-  val idxServiceSpanNameTable = new HBaseTable(conf, TableLayouts.idxServiceSpanNameTableName, mainExecutor = ThreadProvider.indexServiceSpanExecutor)
-  val idxServiceAnnotationTable = new HBaseTable(conf, TableLayouts.idxServiceAnnotationTableName, mainExecutor = ThreadProvider.indexAnnotationExecutor)
+  private[this] val idxServiceTable = new HBaseTable(conf, TableLayouts.idxServiceTableName, mainExecutor = ThreadProvider.indexServiceExecutor)
+  private[this] val idxServiceSpanNameTable = new HBaseTable(conf, TableLayouts.idxServiceSpanNameTableName, mainExecutor = ThreadProvider.indexServiceSpanExecutor)
+  private[this] val idxServiceAnnotationTable = new HBaseTable(conf, TableLayouts.idxServiceAnnotationTableName, mainExecutor = ThreadProvider.indexAnnotationExecutor)
 
-  val mappingTable = new HBaseTable(conf, TableLayouts.mappingTableName, mainExecutor = ThreadProvider.mappingTableExecutor)
-  val idGenTable = new HBaseTable(conf, TableLayouts.idGenTableName, mainExecutor = ThreadProvider.idGenTableExecutor)
+  private[this] val mappingTable = new HBaseTable(conf, TableLayouts.mappingTableName, mainExecutor = ThreadProvider.mappingTableExecutor)
+  private[this] val idGenTable = new HBaseTable(conf, TableLayouts.idGenTableName, mainExecutor = ThreadProvider.idGenTableExecutor)
 
-  lazy val idGen = new IDGenerator(idGenTable)
-  lazy val serviceMapper = new ServiceMapper(mappingTable, idGen)
-  val serializer = new BinaryThriftStructSerializer[thriftscala.Span] {
+  private[this] lazy val idGen = new IDGenerator(idGenTable)
+  private[this] lazy val serviceMapper = new ServiceMapper(mappingTable, idGen)
+  private[this] val serializer = new BinaryThriftStructSerializer[thriftscala.Span] {
     def codec = thriftscala.Span
   }
 
@@ -62,7 +61,7 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
     }
 
     resultsFuture.map { results =>
-      results.flatMap { result => indexResultToTraceId(result) }.toSeq.distinct.take(limit)
+      results.flatMap { result => indexResultToTraceId(result) }.distinct.take(limit)
     }
   }
 
@@ -86,22 +85,9 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
       scan.addFamily(TableLayouts.idxAnnotationFamily)
       value.foreach { bb => scan.setFilter(new ValueFilter(CompareOp.EQUAL, new BinaryComparator(Util.getArrayFromBuffer(bb)))) }
       idxServiceAnnotationTable.scan(scan, limit).map { results =>
-        results.flatMap { result => indexResultToTraceId(result)}.toSeq.distinct.take(limit)
+        results.flatMap { result => indexResultToTraceId(result)}.distinct.take(limit)
       }
     }
-  }
-
-  /**
-   * Fetch the duration or an estimate thereof from the traces.
-   * Duration returned in micro seconds.
-   */
-  override def getTracesDuration(traceIds: Seq[Long]): Future[Seq[TraceIdDuration]] = {
-    val gets = traceIds.map { traceId =>
-      val get = new Get(Bytes.toBytes(traceId))
-      get.setMaxVersions(1)
-    }
-    // Go to hbase to get all of the durations.
-    durationTable.get(gets).map { results => results.map(durationResultToDuration).toSet.toSeq  }
   }
 
   /**
@@ -136,8 +122,7 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
             indexServiceName(span),
             indexSpanNameByService(span),
             indexTraceIdByServiceAndName(span),
-            indexSpanByAnnotations(span),
-            indexSpanDuration(span))
+            indexSpanByAnnotations(span))
       }).unit
     })
   }
@@ -249,24 +234,6 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
   }
 
   /**
-   * Index a span's duration. This is so we can look up the trace duration.
-   */
-  private[hbase] def indexSpanDuration(span: Span): Future[Unit] = {
-    val durationOption = span.duration
-    val tsOption = getTimeStamp(span)
-    val putOption = (durationOption, tsOption) match {
-      case (Some(duration), Some(timestamp)) => Option({
-        val put = new Put(Bytes.toBytes(span.traceId))
-        put.add(TableLayouts.durationDurationFamily, Bytes.toBytes(span.id), Bytes.toBytes(duration))
-        put.add(TableLayouts.durationStartTimeFamily, Bytes.toBytes(span.id), Bytes.toBytes(timestamp))
-        put
-      })
-      case _ => None
-    }
-    putOption.map { put => durationTable.put(Seq(put)) }.getOrElse(Future.Unit)
-  }
-
-  /**
    * Close the storage
    */
   override def close() {
@@ -275,33 +242,9 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
     mappingTable.close()
 
     //ttl tables.
-    durationTable.close()
     idxServiceTable.close()
     idxServiceAnnotationTable.close()
     idxServiceSpanNameTable.close()
-  }
-
-  /**
-   * Set the ttl of a trace. Used to store a particular trace longer than the
-   * default. It must be oh so interesting!
-   *
-   * This is a NO-OP for HBase. when the data is initially put into HBase the ttl starts from the
-   * timestamp. See http://hbase.apache.org/book.html#ttl for more information about HBase's TTL Data model.
-   */
-  override def setTimeToLive(traceId: Long, ttl: Duration): Future[Unit] = Future.Unit
-
-  /**
-   * Get the time to live for a specific trace.
-   * If there are multiple ttl entries for one trace, pick the lowest one.
-   */
-  override def getTimeToLive(traceId: Long): Future[Duration] = Future.value(7.days)
-
-  override def tracesExist(traceIds: Seq[Long]): Future[Set[Long]] = {
-    val gets = traceIds.map(createTraceExistsGet)
-    val futures: Future[Seq[Result]] = hbaseTable.get(gets)
-    futures.map { results =>
-      results.map(traceExistsResultToTraceId).toSet
-    }
   }
 
   /**
@@ -317,18 +260,6 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
       }
     }
   }
-
-  override def getSpansByTraceId(traceId: Long): Future[Seq[Span]] = {
-    val gets = createTraceGets(List(traceId))
-    hbaseTable.get(gets).map { rl =>
-      resultToSpans(rl.headOption).sortBy { span => getTimeStamp(span)}
-    }
-  }
-
-  /**
-   * How long do we store the data before we delete it? In seconds.
-   */
-  override def getDataTimeToLive() = Future.value(TableLayouts.storageTTL.inSeconds)
 
   //
   // Internal Helper Methods.
@@ -375,28 +306,6 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
     }
   }
 
-  private[this] def durationResultToDuration(result: Result): TraceIdDuration = {
-    val traceId = Bytes.toLong(result.getRow)
-    val durationMap = result.getFamilyMap(TableLayouts.durationDurationFamily).asScala
-    val startMap = result.getFamilyMap(TableLayouts.durationStartTimeFamily).asScala
-
-    val duration = durationMap.map { case (qual, value) => Bytes.toLong(value)}.sum
-    val start = startMap.map { case (qual, value) => Bytes.toLong(value)}.min
-
-    TraceIdDuration(traceId, duration, start)
-  }
-
-  private[this] def createTraceExistsGet(traceId: Long): Get = {
-    val g = new Get(Bytes.toBytes(traceId))
-    g.addFamily(TableLayouts.storageFamily)
-    g.setFilter(new KeyOnlyFilter())
-    g
-  }
-
-  private[this] def traceExistsResultToTraceId(result: Result): Long = {
-    traceIdFromRowKey(result.getRow)
-  }
-
   /**
    * This creates an HBase Get request for a Seq of traces.
    * @param traceIds All of the traceId's that are requested.
@@ -421,8 +330,6 @@ class HBaseSpanStore(conf: Configuration) extends SpanStore {
     }
     spans
   }
-
-  private[this] def traceIdFromRowKey(bytes: Array[Byte]): Long = Bytes.toLong(bytes)
 
   private[this] def rowKeyFromSpan(span: Span): Array[Byte] = Bytes.toBytes(span.traceId)
 }
