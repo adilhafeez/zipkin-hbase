@@ -98,22 +98,6 @@ class HBaseSpanStoreSpec extends ZipkinHBaseSpecification {
     result.size should be (1)
   }
 
-  test("indexDuration") {
-    val durationTable = new HBaseTable(_conf, TableLayouts.durationTableName)
-    Await.result(spanStore.indexSpanDuration(spanOne))
-    val result = Await.result(durationTable.scan(new Scan(), 1000))
-    result.size should be (1)
-  }
-
-  test("getTracesDuration") {
-    Await.result(spanStore.indexSpanDuration(spanOne))
-    val durations = Await.result(spanStore.getTracesDuration(Seq(traceIdOne)))
-    durations should not be (Seq())
-    durations.map {_.duration} should contain(100)
-
-    durations.map {_.traceId} should contain(traceIdOne)
-  }
-
   test("getTraceIdsByName") {
     Await.result(spanStore.indexServiceName(spanOne))
     Await.result(spanStore.indexServiceName(spanTwo))
@@ -162,20 +146,6 @@ class HBaseSpanStoreSpec extends ZipkinHBaseSpecification {
     val htable = new HTable(_conf, TableLayouts.storageTableName)
     val result = htable.get(new Get(Bytes.toBytes(traceId)))
     result.size shouldEqual 1
-  }
-
-  test("tracesExist") {
-    // Put the span just in case the ordering changes.
-    Await.result(spanStore.apply(Seq(span)))
-    val idsFound = Await.result(spanStore.tracesExist(Seq(traceId, 3002L)))
-    idsFound should contain(traceId)
-    idsFound.size should be (1)
-  }
-
-  test("getSpansByTraceId") {
-    Await.result(spanStore.apply(Seq(span)))
-    val spansFound = spanStore.getSpansByTraceId(traceId)
-    Await.result(spansFound) should contain(span)
   }
 
   test("getSpansByTraceIds") {
