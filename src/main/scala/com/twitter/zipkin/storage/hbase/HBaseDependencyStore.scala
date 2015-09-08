@@ -6,7 +6,7 @@ import com.twitter.util.{Future, Time}
 import com.twitter.zipkin.common.Dependencies
 import com.twitter.zipkin.conversions.thrift._
 import com.twitter.zipkin.hbase.TableLayouts
-import com.twitter.zipkin.storage.Aggregates
+import com.twitter.zipkin.storage.DependencyStore
 import com.twitter.zipkin.storage.hbase.utils.HBaseTable
 import com.twitter.zipkin.thriftscala
 import org.apache.hadoop.conf.Configuration
@@ -15,7 +15,7 @@ import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.JavaConverters._
 
-class HBaseAggregates(conf: Configuration) extends Aggregates {
+class HBaseDependencyStore(conf: Configuration) extends DependencyStore {
 
   val dependenciesTable = new HBaseTable(conf, TableLayouts.dependenciesTableName)
 

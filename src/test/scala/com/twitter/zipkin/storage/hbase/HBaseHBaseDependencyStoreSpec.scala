@@ -3,12 +3,12 @@ package com.twitter.zipkin.storage.hbase
 import com.twitter.algebird.Moments
 import com.twitter.util.{Await, Time}
 import com.twitter.zipkin.common.{Dependencies, DependencyLink, Service}
-import com.twitter.zipkin.hbase.{AggregatesBuilder, TableLayouts}
+import com.twitter.zipkin.hbase.{DependencyStoreBuilder, TableLayouts}
 import com.twitter.zipkin.storage.hbase.utils.HBaseTable
 import org.apache.hadoop.hbase.client.Get
 import org.apache.hadoop.hbase.util.Bytes
 
-class HBaseAggregatesSpec extends ZipkinHBaseSpecification {
+class HBaseHBaseDependencyStoreSpec extends ZipkinHBaseSpecification {
 
   val tablesNeeded = Seq(
     TableLayouts.dependenciesTableName,
@@ -16,7 +16,7 @@ class HBaseAggregatesSpec extends ZipkinHBaseSpecification {
     TableLayouts.mappingTableName
   )
 
-  val aggregates: HBaseAggregates = AggregatesBuilder(confOption = Some(_conf))()
+  val dependencyStore = DependencyStoreBuilder(confOption = Some(_conf))()
 
   val m1 = Moments(1)
   val m2 = Moments(2)
@@ -25,7 +25,7 @@ class HBaseAggregatesSpec extends ZipkinHBaseSpecification {
   val deps = Dependencies(Time.fromSeconds(2), Time.fromSeconds(1000), List(d1, d2))
 
   test("storeDependencies") {
-    Await.result(aggregates.storeDependencies(deps))
+    Await.result(dependencyStore.storeDependencies(deps))
     val depsTable = new HBaseTable(_conf, TableLayouts.dependenciesTableName)
     val get = new Get(Bytes.toBytes(Long.MaxValue - Time.fromSeconds(2).inMilliseconds))
     val result = Await.result(depsTable.get(Seq(get)))
@@ -33,8 +33,8 @@ class HBaseAggregatesSpec extends ZipkinHBaseSpecification {
   }
 
   test("getDependencies") {
-    Await.result(aggregates.storeDependencies(deps))
-    val retrieved = Await.result(aggregates.getDependencies(Some(Time.fromSeconds(100))))
+    Await.result(dependencyStore.storeDependencies(deps))
+    val retrieved = Await.result(dependencyStore.getDependencies(Some(Time.fromSeconds(100))))
     retrieved should be (deps)
   }
 }

@@ -15,12 +15,15 @@ repositories {
     jcenter()
     maven { url 'https://repo.typesafe.com/typesafe/releases/' }
     maven { url 'https://maven.twttr.com/' }
+    // Temporary until jcenter comes back for zipkin
+    // https://github.com/openzipkin/zipkin/issues/699
+    maven { url 'https://dl.bintray.com/openzipkin/zipkin/' }
 }
 
 ext {
     scalaVersion = '2.11.7'
     scalaInterfaceVersion = '2.11'
-    zipkinVersion = '1.5.1'
+    zipkinVersion = '1.6.0'
 }
 
 dependencies {
